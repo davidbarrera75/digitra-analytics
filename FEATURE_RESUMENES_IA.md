@@ -2,32 +2,37 @@
 
 ## Descripción
 
-Sistema de generación automática de resúmenes mensuales usando **Claude AI** (Anthropic). Cada usuario recibe un análisis personalizado de su negocio con insights, recomendaciones y comparaciones históricas.
+Sistema de generación **on-demand** de análisis mensuales usando **Claude AI** (Anthropic). Cada usuario puede solicitar cuando lo desee un análisis personalizado de su negocio con insights, recomendaciones y comparaciones históricas. Esto optimiza costos generando análisis solo cuando el usuario realmente lo necesita.
 
 ---
 
 ## 💰 Costos
 
-### Por Usuario/Mes:
-- **Resumen Simple**: $0.03 USD/mes (~2,500 tokens input + 1,500 output)
-- **Resumen Extendido**: $0.05 USD/mes (~4,000 tokens input + 2,500 output)
+### Por Análisis Generado:
+- **Resumen Simple**: $0.03 USD (~2,500 tokens input + 1,500 output)
+- **Resumen Extendido**: $0.05 USD (~4,000 tokens input + 2,500 output)
 
-### Proyección:
-| Usuarios | Costo Mensual | Costo Anual |
-|----------|---------------|-------------|
-| 50       | $1.50 - $2.50 | $18 - $30   |
-| 100      | $3 - $5       | $36 - $60   |
-| 500      | $15 - $25     | $180 - $300 |
-| 1,000    | $30 - $50     | $360 - $600 |
+### Proyección (Generación On-Demand):
+**Solo pagas por análisis realmente generados**
+
+| Escenario | Análisis/Mes | Costo Mensual | Costo Anual |
+|-----------|--------------|---------------|-------------|
+| 10 usuarios activos | 10 | $0.30 - $0.50 | $3.60 - $6 |
+| 50 usuarios activos | 50 | $1.50 - $2.50 | $18 - $30 |
+| 100 usuarios activos | 100 | $3 - $5 | $36 - $60 |
+| 500 usuarios activos | 500 | $15 - $25 | $180 - $300 |
+
+> **Ventaja On-Demand:** Si tienes 1,000 usuarios pero solo 100 generan análisis mensualmente, pagas solo por 100 análisis ($3-5/mes) en lugar de 1,000 ($30-50/mes).
 
 ---
 
 ## 🎯 Características
 
-### 1. **Generación Automática**
-- Se ejecuta el día 1 de cada mes
-- Analiza datos del mes anterior
+### 1. **Generación On-Demand**
+- El usuario decide cuándo generar el análisis
+- Botón "Generar Análisis IA" en el dashboard
 - Genera resumen en menos de 10 segundos
+- Ahorro de tokens: solo se genera cuando se solicita
 
 ### 2. **Contenido del Resumen**
 - ✅ Saludo personalizado
@@ -49,10 +54,11 @@ Sistema de generación automática de resúmenes mensuales usando **Claude AI** 
 
 ### 4. **Widget en Dashboard**
 - Diseño atractivo con gradientes
+- Botón "Generar Análisis IA" para solicitar análisis
 - Formato markdown renderizado
 - Badge de estado actualizado
 - Información de tokens usados
-- Estado vacío informativo
+- Estado vacío con CTA (Call-to-Action)
 
 ---
 
@@ -97,7 +103,17 @@ Esto creará la tabla `resumenes_mensuales_ia` con los siguientes campos:
 
 ## 📝 Uso
 
-### Generar Resumen Manualmente
+### Desde el Dashboard (Recomendado)
+
+1. Ingresa al dashboard de Digitra Analytics
+2. Busca el widget "Análisis IA"
+3. Haz clic en el botón **"Generar Análisis IA"**
+4. Espera unos segundos y recarga la página
+5. ¡Listo! Tu análisis personalizado estará disponible
+
+> **Nota:** Solo puedes generar un análisis por mes. El análisis se genera para el mes actual con datos disponibles.
+
+### Generar Resumen desde Línea de Comandos (Administrador)
 
 #### Para un usuario específico:
 ```bash
@@ -114,22 +130,7 @@ php artisan resumen:generar --todos --mes=10 --año=2024
 php artisan resumen:generar --todos
 ```
 
-### Automatización (Cron)
-
-Agrega a tu `crontab` o scheduler:
-
-```php
-// app/Console/Kernel.php
-
-protected function schedule(Schedule $schedule)
-{
-    // Generar resúmenes el día 1 de cada mes a las 2 AM
-    $schedule->command('resumen:generar --todos')
-        ->monthlyOn(1, '02:00')
-        ->onOneServer()
-        ->withoutOverlapping();
-}
-```
+> **Importante:** La generación on-demand ahorra tokens y costos. Solo se genera cuando el usuario realmente lo necesita.
 
 ---
 

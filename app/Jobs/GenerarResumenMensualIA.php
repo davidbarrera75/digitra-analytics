@@ -161,16 +161,17 @@ class GenerarResumenMensualIA implements ShouldQueue
         $diasDisponibles = $propiedadesCount * $inicio->daysInMonth;
         $porcentajeOcupacion = $diasDisponibles > 0 ? ($noches / $diasDisponibles) * 100 : 0;
 
-        // Obtener gastos del período
-        $gastos = GastoMensual::whereIn('establecimiento_id', function ($query) use ($digitraUserId) {
-            $query->select('id')
-                ->from('establecimientos')
-                ->where('user_id', $digitraUserId)
-                ->where('deleted', false);
-        })
-        ->where('mes', $inicio->month)
-        ->where('año', $inicio->year)
-        ->get();
+        // Obtener IDs de establecimientos del usuario (MySQL)
+        $establecimientosIds = \App\Models\Digitra\Establecimiento::where('user_id', $digitraUserId)
+            ->where('deleted', false)
+            ->pluck('id')
+            ->toArray();
+
+        // Obtener gastos del período (SQLite)
+        $gastos = GastoMensual::whereIn('establecimiento_id', $establecimientosIds)
+            ->where('mes', $inicio->month)
+            ->where('año', $inicio->year)
+            ->get();
 
         $gastosTotal = $gastos->sum(function ($gasto) {
             return $gasto->aseo + $gasto->administracion + $gasto->otros_gastos;

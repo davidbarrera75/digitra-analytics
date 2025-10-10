@@ -54,21 +54,21 @@
             </div>
 
         @else
-            {{-- Estado Vacío --}}
+            {{-- Estado Vacío - Sin resumen para el mes actual --}}
             <div class="flex flex-col items-center justify-center py-12">
-                <div class="flex h-20 w-20 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
-                    <svg class="h-10 w-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div class="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-primary-100 to-primary-200 dark:from-primary-900 dark:to-primary-800">
+                    <svg class="h-10 w-10 text-primary-600 dark:text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
                     </svg>
                 </div>
 
                 <h3 class="mt-4 text-lg font-semibold text-gray-900 dark:text-white">
-                    Resumen IA Próximamente
+                    Genera tu Análisis IA
                 </h3>
 
                 <p class="mt-2 max-w-md text-center text-sm text-gray-500 dark:text-gray-400">
-                    Tu resumen mensual con inteligencia artificial se generará automáticamente el primer día de cada mes.
-                    Recibirás insights, recomendaciones y análisis detallados de tu negocio.
+                    Obtén insights personalizados, recomendaciones y análisis detallados de tu negocio powered by Claude AI.
+                    Haz clic en el botón para generar tu análisis del mes actual.
                 </p>
 
                 <div class="mt-6 flex items-center gap-4">
@@ -76,23 +76,46 @@
                         <svg class="h-5 w-5 text-success-500" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
                         </svg>
-                        Análisis automático
+                        Análisis inteligente
                     </div>
 
                     <div class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                         <svg class="h-5 w-5 text-success-500" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
                         </svg>
-                        Recomendaciones personalizadas
+                        Recomendaciones accionables
                     </div>
 
                     <div class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                         <svg class="h-5 w-5 text-success-500" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
                         </svg>
-                        Insights con IA
+                        Comparativas históricas
                     </div>
                 </div>
+
+                {{-- Botón para generar análisis --}}
+                <div class="mt-8">
+                    <button
+                        wire:click="generarAnalisis"
+                        wire:loading.attr="disabled"
+                        class="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-primary-600 to-primary-700 px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:from-primary-700 hover:to-primary-800 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed dark:from-primary-500 dark:to-primary-600"
+                    >
+                        <svg wire:loading.remove class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        </svg>
+                        <svg wire:loading class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span wire:loading.remove>Generar Análisis IA</span>
+                        <span wire:loading>Generando...</span>
+                    </button>
+                </div>
+
+                <p class="mt-4 text-xs text-gray-400 dark:text-gray-500">
+                    El análisis se generará en segundos. Recarga la página una vez completado.
+                </p>
             </div>
         @endif
     </x-filament::section>
