@@ -167,15 +167,18 @@ class GenerarResumenMensualIA implements ShouldQueue
             ->pluck('id')
             ->toArray();
 
-        // Obtener gastos del período (SQLite)
-        $gastos = GastoMensual::whereIn('establecimiento_id', $establecimientosIds)
-            ->where('mes', $inicio->month)
-            ->where('año', $inicio->year)
-            ->get();
-
-        $gastosTotal = $gastos->sum(function ($gasto) {
-            return $gasto->aseo + $gasto->administracion + $gasto->otros_gastos;
-        });
+        // Obtener gastos del período (SQLite) - Usar DB::table para evitar relaciones Eloquent
+        $gastosTotal = 0;
+        if (count($establecimientosIds) > 0) {
+            $gastosTotal = \DB::table('gastos_mensuales')
+                ->whereIn('establecimiento_id', $establecimientosIds)
+                ->where('mes', $inicio->month)
+                ->where('año', $inicio->year)
+                ->get()
+                ->sum(function ($gasto) {
+                    return $gasto->aseo + $gasto->administracion + $gasto->otros_gastos;
+                });
+        }
 
         $utilidadNeta = $ingresos - $gastosTotal;
 
