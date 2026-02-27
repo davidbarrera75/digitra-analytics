@@ -57,8 +57,8 @@ class TestTenantCommand extends Command
         $this->info('📝 Para probar en el panel:');
         $this->line('  1. Iniciar servidor: php artisan serve');
         $this->line('  2. Acceder: http://localhost:8000/admin');
-        $this->line('  3. Login como Super Admin: admin@digitra.com / admin123');
-        $this->line('  4. O como Tenant Admin: admin.tenant1@digitra.com / password');
+        $this->line('  3. Login como Super Admin: (usar credenciales del .env)');
+        $this->line('  4. O como Tenant Admin: (usar credenciales configuradas)');
 
         return Command::SUCCESS;
     }

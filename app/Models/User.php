@@ -8,8 +8,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
+use Filament\Models\Contracts\FilamentUser;
+use Filament\Panel;
 
-class User extends Authenticatable
+class User extends Authenticatable implements FilamentUser
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasFactory, Notifiable, HasRoles;
@@ -78,6 +80,35 @@ class User extends Authenticatable
     /**
      * Obtener el tenant actual (para super admins puede ser diferente al tenant asignado)
      */
+    /**
+     * Determinar si el usuario puede acceder al panel de Filament
+     */
+    public function canAccessPanel(Panel $panel): bool
+    {
+        // Super admins siempre tienen acceso
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
+        // Usuarios normales necesitan tener un tenant activo
+        if (!$this->tenant_id) {
+            return false;
+        }
+
+        // Verificar que el tenant esté activo y no tenga trial expirado
+        $tenant = $this->tenant;
+        if (!$tenant || !$tenant->is_active) {
+            return false;
+        }
+
+        // Si tiene trial, verificar que no haya expirado
+        if ($tenant->trial_ends_at && $tenant->trialExpired()) {
+            return false;
+        }
+
+        return true;
+    }
+
     public function getCurrentTenant(): ?Tenant
     {
         // Si es super admin, puede tener un tenant "activo" en sesión

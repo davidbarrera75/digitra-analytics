@@ -12,6 +12,7 @@ use App\Models\ReservaCorregida;
 use Flowframe\Trend\Trend;
 use Flowframe\Trend\TrendValue;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
 class InformeService
@@ -22,12 +23,8 @@ class InformeService
      */
     private function aplicarFiltrosCalidad($query)
     {
-        // Excluir reservas marcadas como ignoradas
-        $reservasIgnoradas = ReservaIgnorada::pluck('reserva_id')->toArray();
-
-        if (count($reservasIgnoradas) > 0) {
-            $query->whereNotIn('id', $reservasIgnoradas);
-        }
+        // Excluir reservas ignoradas usando subquery (no carga IDs a memoria)
+        $query->whereNotIn('id', ReservaIgnorada::query()->select('reserva_id'));
 
         return $query;
     }
@@ -71,6 +68,14 @@ class InformeService
     {
         $fechaInicio = $fechaInicio ?? now()->subMonths(3)->startOfMonth();
         $fechaFin = $fechaFin ?? now()->endOfMonth();
+        // Convertir establecimientoId (id de tabla) a digitra_id para filtrar reservas
+        $digitraIdEstablecimiento = null;
+        if ($establecimientoId) {
+            $establecimiento = Establecimiento::find($establecimientoId);
+            if ($establecimiento) {
+                $digitraIdEstablecimiento = $establecimiento->digitra_id;
+            }
+        }
 
         // Obtener digitra_user_id del tenant actual
         $digitraUserId = digitra_user_id();
@@ -88,7 +93,7 @@ class InformeService
                     . '_tenant' . ($digitraUserId ?? 'all')
                     . '_estab' . ($establecimientoId ?? 'all');
 
-        return Cache::remember($cacheKey, 600, function () use ($fechaInicio, $fechaFin, $digitraUserId, $establecimientoId) {
+        return Cache::remember($cacheKey, 600, function () use ($fechaInicio, $fechaFin, $digitraUserId, $establecimientoId, $digitraIdEstablecimiento) {
             // Calcular meses de forma más precisa
             $diffInMonths = $fechaInicio->diffInMonths($fechaFin);
             // Si la diferencia en días no es exactamente múltiplo de 30, considerar mes parcial
@@ -103,17 +108,17 @@ class InformeService
                     'meses' => $mesesCalculados,
                 ],
                 'establecimiento' => $establecimientoId ? Establecimiento::find($establecimientoId) : null,
-                'estadisticas_generales' => $this->obtenerEstadisticasGenerales($fechaInicio, $fechaFin, $establecimientoId),
-                'reservas' => $this->obtenerDatosReservas($fechaInicio, $fechaFin, $establecimientoId),
-                'reservas_detalle' => $this->obtenerDetalleReservas($fechaInicio, $fechaFin, $establecimientoId),
-                'establecimientos' => $this->obtenerDatosEstablecimientos($fechaInicio, $fechaFin, $establecimientoId),
+                'estadisticas_generales' => $this->obtenerEstadisticasGenerales($fechaInicio, $fechaFin, $establecimientoId, $digitraIdEstablecimiento),
+                'reservas' => $this->obtenerDatosReservas($fechaInicio, $fechaFin, $establecimientoId, $digitraIdEstablecimiento),
+                'reservas_detalle' => $this->obtenerDetalleReservas($fechaInicio, $fechaFin, $establecimientoId, $digitraIdEstablecimiento),
+                'establecimientos' => $this->obtenerDatosEstablecimientos($fechaInicio, $fechaFin, $establecimientoId, $digitraIdEstablecimiento),
                 'usuarios' => $this->obtenerDatosUsuarios($fechaInicio, $fechaFin),
-                'tendencias' => $this->obtenerTendencias($fechaInicio, $fechaFin, $establecimientoId),
-                'noches_por_mes' => $this->obtenerNochesPorMes($fechaInicio, $fechaFin, $establecimientoId),
-                'top_propiedades' => $this->obtenerTopPropiedades($fechaInicio, $fechaFin, 10, $establecimientoId),
+                'tendencias' => $this->obtenerTendencias($fechaInicio, $fechaFin, $establecimientoId, $digitraIdEstablecimiento),
+                'noches_por_mes' => $this->obtenerNochesPorMes($fechaInicio, $fechaFin, $establecimientoId, $digitraIdEstablecimiento),
+                'top_propiedades' => $this->obtenerTopPropiedades($fechaInicio, $fechaFin, 10, $establecimientoId, $digitraIdEstablecimiento),
                 'aniversarios' => $this->obtenerAniversarios($fechaInicio, $fechaFin),
-                'alertas' => $this->validarCalidadDatos($fechaInicio, $fechaFin, $establecimientoId),
-                'gastos' => $this->obtenerGastosMensuales($fechaInicio, $fechaFin, $establecimientoId),
+                'alertas' => $this->validarCalidadDatos($fechaInicio, $fechaFin, $establecimientoId, $digitraIdEstablecimiento),
+                'gastos' => $this->obtenerGastosMensuales($fechaInicio, $fechaFin, $establecimientoId, $digitraIdEstablecimiento),
             ];
         });
     }
@@ -121,15 +126,22 @@ class InformeService
     /**
      * Estadísticas generales
      */
-    private function obtenerEstadisticasGenerales(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null): array
+    private function obtenerEstadisticasGenerales(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null, ?int $digitraIdEstablecimiento = null): array
     {
         // Query base para reservas
         $reservasQuery = Reserva::whereBetween('check_in', [$fechaInicio, $fechaFin]);
 
         // Filtrar por establecimiento si se especifica
         if ($establecimientoId) {
-            $reservasQuery->where('establecimiento_id', $establecimientoId);
-        } else {
+            $reservasQuery->where('establecimiento_digitra_id', $digitraIdEstablecimiento);
+            // VALIDACIÓN DE SEGURIDAD: Verificar que el establecimiento pertenece al usuario
+            $establecimiento = \App\Models\Digitra\Establecimiento::find($establecimientoId);
+            $digitraUserId = digitra_user_id();
+            if ($digitraUserId && (!$establecimiento || $establecimiento->user_id !== $digitraUserId)) {
+    // Si el establecimiento no existe o no pertenece al usuario, forzar query vacío
+    $reservasQuery->whereRaw('1 = 0');
+}
+    } else {
             // Filtrar por tenant
             $digitraUserId = digitra_user_id();
             if ($digitraUserId) {
@@ -144,28 +156,34 @@ class InformeService
 
         $totalReservas = $reservasQuery->count();
 
-        // Calcular ingresos aplicando correcciones de precio
-        $reservasParaIngresos = (clone $reservasQuery)->get();
-        $totalIngresos = 0;
-        foreach ($reservasParaIngresos as $reserva) {
-            $totalIngresos += $this->obtenerPrecioReserva($reserva);
+        // Calcular ingresos: suma en DB + ajuste por correcciones (sin N+1)
+        $totalIngresos = (float) (clone $reservasQuery)->sum('total_pagado');
+
+        // Aplicar correcciones de precio en bulk
+        $reservaIds = (clone $reservasQuery)->pluck('id')->toArray();
+        if (!empty($reservaIds)) {
+            $correcciones = ReservaCorregida::whereIn('reserva_id', $reservaIds)->get();
+            foreach ($correcciones as $correccion) {
+                $totalIngresos = $totalIngresos
+                    - (float) $correccion->precio_original
+                    + (float) $correccion->precio_corregido;
+            }
         }
 
         // Huéspedes
-        $huespedesQuery = Huesped::whereHas('reserva', function ($query) use ($fechaInicio, $fechaFin, $establecimientoId) {
-            $query->whereBetween('check_in', [$fechaInicio, $fechaFin]);
-            if ($establecimientoId) {
-                $query->where('establecimiento_id', $establecimientoId);
-            } else {
-                $digitraUserId = digitra_user_id();
-                if ($digitraUserId) {
-                    $query->whereHas('establecimiento', function ($q) use ($digitraUserId) {
-                        $q->where('user_id', $digitraUserId);
-                    });
+            $huespedesQuery = Huesped::whereHas('reserva', function ($query) use ($fechaInicio, $fechaFin, $digitraIdEstablecimiento, $digitraUserId) {
+                $query->whereBetween('check_in', [$fechaInicio, $fechaFin]);
+                if ($digitraIdEstablecimiento) {
+                    $query->where('establecimiento_digitra_id', $digitraIdEstablecimiento);
+                } else {
+                    if ($digitraUserId) {
+                        $query->whereHas('establecimiento', function ($q) use ($digitraUserId) {
+                            $q->where('user_id', $digitraUserId);
+                        });
+                    }
                 }
-            }
-        });
-        $totalHuespedes = $huespedesQuery->distinct('numero_documento')->count();
+            });
+            $totalHuespedes = $huespedesQuery->distinct('numero_documento')->count();
 
         // Establecimientos: si es un informe específico, solo 1, si no, contar los del tenant
         if ($establecimientoId) {
@@ -199,14 +217,21 @@ class InformeService
     /**
      * Datos de reservas
      */
-    private function obtenerDatosReservas(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null): array
+    private function obtenerDatosReservas(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null, ?int $digitraIdEstablecimiento = null): array
     {
         $reservasQuery = Reserva::whereBetween('check_in', [$fechaInicio, $fechaFin]);
 
         // Filtrar por establecimiento si se especifica
         if ($establecimientoId) {
-            $reservasQuery->where('establecimiento_id', $establecimientoId);
-        } else {
+            $reservasQuery->where('establecimiento_digitra_id', $digitraIdEstablecimiento);
+            // VALIDACIÓN DE SEGURIDAD: Verificar que el establecimiento pertenece al usuario
+            $establecimiento = \App\Models\Digitra\Establecimiento::find($establecimientoId);
+$digitraUserId = digitra_user_id();
+if ($digitraUserId && (!$establecimiento || $establecimiento->user_id !== $digitraUserId)) {
+    // Si el establecimiento no existe o no pertenece al usuario, forzar query vacío
+    $reservasQuery->whereRaw('1 = 0');
+}
+    } else {
             // Filtrar por tenant
             $digitraUserId = digitra_user_id();
             if ($digitraUserId) {
@@ -232,14 +257,21 @@ class InformeService
     /**
      * Detalle completo de reservas para el informe
      */
-    private function obtenerDetalleReservas(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null): array
+    private function obtenerDetalleReservas(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null, ?int $digitraIdEstablecimiento = null): array
     {
         $reservasQuery = Reserva::with(['establecimiento', 'huespedes'])
             ->whereBetween('check_in', [$fechaInicio, $fechaFin]);
 
         // Filtrar por establecimiento si se especifica
         if ($establecimientoId) {
-            $reservasQuery->where('establecimiento_id', $establecimientoId);
+            $reservasQuery->where('establecimiento_digitra_id', $digitraIdEstablecimiento);
+            // VALIDACIÓN DE SEGURIDAD: Verificar que el establecimiento pertenece al usuario
+            $establecimiento = \App\Models\Digitra\Establecimiento::find($establecimientoId);
+            $digitraUserId = digitra_user_id();
+            if ($digitraUserId && (!$establecimiento || $establecimiento->user_id !== $digitraUserId)) {
+    // Si el establecimiento no existe o no pertenece al usuario, forzar query vacío
+    $reservasQuery->whereRaw('1 = 0');
+}
         } else {
             // Filtrar por tenant
             $digitraUserId = digitra_user_id();
@@ -250,18 +282,28 @@ class InformeService
             }
         }
 
-        // APLICAR FILTROS DE CALIDAD
-        $this->aplicarFiltrosCalidad($reservasQuery);
 
-        return $reservasQuery
-            ->orderBy('check_in', 'desc')
-            ->get()
-            ->map(function ($reserva) {
-                // Obtener el primer huésped (responsable de la reserva)
+    // APLICAR FILTROS DE CALIDAD
+    $this->aplicarFiltrosCalidad($reservasQuery);
+
+        $reservas = $reservasQuery->orderBy('check_in', 'desc')->get();
+
+        // Precargar correcciones en bulk (evita N+1)
+        $reservaIds = $reservas->pluck('id')->toArray();
+        $correcciones = !empty($reservaIds)
+            ? ReservaCorregida::whereIn('reserva_id', $reservaIds)
+                ->get()
+                ->keyBy('reserva_id')
+            : collect();
+
+        return $reservas->map(function ($reserva) use ($correcciones) {
                 $primerHuesped = $reserva->huespedes->first();
 
-                // Aplicar corrección de precio si existe
-                $precioFinal = $this->obtenerPrecioReserva($reserva);
+                // Usar corrección precargada si existe
+                $correccion = $correcciones->get($reserva->id);
+                $precioFinal = $correccion
+                    ? (float) $correccion->precio_corregido
+                    : (float) $reserva->precio;
 
                 return [
                     'id' => $reserva->id,
@@ -281,7 +323,7 @@ class InformeService
     /**
      * Datos de establecimientos
      */
-    private function obtenerDatosEstablecimientos(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null): array
+    private function obtenerDatosEstablecimientos(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null, ?int $digitraIdEstablecimiento = null): array
     {
         // Si es un informe específico de un establecimiento
         if ($establecimientoId) {
@@ -317,11 +359,13 @@ class InformeService
             'total_activos' => (clone $queryBase)->count(),
             'con_auto_tra' => (clone $queryBase)->where('auto_send_tra', true)->count(),
             'con_documentacion' => (clone $queryBase)->where('documentacion', true)->count(),
-            'con_reservas_en_periodo' => (clone $queryBase)
-                ->whereHas('reservas', function ($query) use ($fechaInicio, $fechaFin) {
-                    $query->whereBetween('check_in', [$fechaInicio, $fechaFin]);
-                })
-                ->count(),
+            'con_reservas_en_periodo' => Reserva::whereBetween('check_in', [$fechaInicio, $fechaFin])
+                ->whereIn(
+                    'establecimiento_digitra_id',
+                    (clone $queryBase)->pluck('digitra_id')->toArray()
+                )
+                ->distinct('establecimiento_digitra_id')
+                ->count('establecimiento_digitra_id'),
         ];
     }
 
@@ -333,24 +377,35 @@ class InformeService
         return [
             'total_con_propiedades' => DigitraUser::conEstablecimientos()->count(),
             'colasistencia' => DigitraUser::where('is_colasistencia', true)->count(),
-            'con_reservas_en_periodo' => DigitraUser::whereHas('reservas', function ($query) use ($fechaInicio, $fechaFin) {
-                $query->whereBetween('check_in', [$fechaInicio, $fechaFin]);
-            })->count(),
+            'con_reservas_en_periodo' => DB::connection('sqlite')
+                ->table('digitra_reservas')
+                ->whereBetween('check_in', [$fechaInicio, $fechaFin])
+                ->join('digitra_establecimientos', 'digitra_reservas.establecimiento_digitra_id', '=', 'digitra_establecimientos.digitra_id')
+                ->where('digitra_establecimientos.deleted', false)
+                ->distinct('digitra_establecimientos.user_id')
+                ->count('digitra_establecimientos.user_id'),
         ];
     }
 
     /**
      * Tendencias de reservas por mes
      */
-    private function obtenerTendencias(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null): array
+    private function obtenerTendencias(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null, ?int $digitraIdEstablecimiento = null): array
     {
         // Query base
         $query = Reserva::query();
 
         // Filtrar por establecimiento si se especifica
         if ($establecimientoId) {
-            $query->where('establecimiento_id', $establecimientoId);
-        } else {
+            $query->where('establecimiento_digitra_id', $digitraIdEstablecimiento);
+// VALIDACIÓN DE SEGURIDAD: Verificar que el establecimiento pertenece al usuario
+            $establecimiento = \App\Models\Digitra\Establecimiento::find($establecimientoId);
+            $digitraUserId = digitra_user_id();
+            if ($digitraUserId && (!$establecimiento || $establecimiento->user_id !== $digitraUserId)) {
+    // Si el establecimiento no existe o no pertenece al usuario, forzar query vacío
+    $query->whereRaw('1 = 0');
+}
+    } else {
             // Filtrar por tenant
             $digitraUserId = digitra_user_id();
             if ($digitraUserId) {
@@ -388,7 +443,7 @@ class InformeService
     /**
      * Total de noches reservadas por mes
      */
-    private function obtenerNochesPorMes(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null): array
+    private function obtenerNochesPorMes(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null, ?int $digitraIdEstablecimiento = null): array
     {
         // Query base para reservas
         $reservasQuery = Reserva::query()
@@ -397,8 +452,15 @@ class InformeService
 
         // Filtrar por establecimiento si se especifica
         if ($establecimientoId) {
-            $reservasQuery->where('establecimiento_id', $establecimientoId);
-        } else {
+            $reservasQuery->where('establecimiento_digitra_id', $digitraIdEstablecimiento);
+            // VALIDACIÓN DE SEGURIDAD: Verificar que el establecimiento pertenece al usuario
+            $establecimiento = \App\Models\Digitra\Establecimiento::find($establecimientoId);
+$digitraUserId = digitra_user_id();
+if ($digitraUserId && (!$establecimiento || $establecimiento->user_id !== $digitraUserId)) {
+    // Si el establecimiento no existe o no pertenece al usuario, forzar query vacío
+    $reservasQuery->whereRaw('1 = 0');
+}
+    } else {
             // Filtrar por tenant
             $digitraUserId = digitra_user_id();
             if ($digitraUserId) {
@@ -453,7 +515,7 @@ class InformeService
     /**
      * Top 10 propiedades por reservas
      */
-    private function obtenerTopPropiedades(Carbon $fechaInicio, Carbon $fechaFin, int $limit = 10, ?int $establecimientoId = null): array
+    private function obtenerTopPropiedades(Carbon $fechaInicio, Carbon $fechaFin, int $limit = 10, ?int $establecimientoId = null, ?int $digitraIdEstablecimiento = null): array
     {
         // Si es un informe específico, solo ese establecimiento
         if ($establecimientoId) {
@@ -468,7 +530,7 @@ class InformeService
 
             return [[
                 'nombre' => $establecimiento->nombre,
-                'propietario' => $establecimiento->user->name ?? 'N/A',
+                'propietario' => $establecimiento->user_name ?? 'N/A',
                 'reservas' => $reservasCount,
                 'rnt' => $establecimiento->rnt,
             ]];
@@ -486,14 +548,14 @@ class InformeService
             ->withCount(['reservas' => function ($query) use ($fechaInicio, $fechaFin) {
                 $query->whereBetween('check_in', [$fechaInicio, $fechaFin]);
             }])
-            ->with('user')
+        
             ->orderByDesc('reservas_count')
             ->limit($limit)
             ->get()
             ->map(function ($establecimiento) {
                 return [
                     'nombre' => $establecimiento->nombre,
-                    'propietario' => $establecimiento->user->name ?? 'N/A',
+                    'propietario' => $establecimiento->user_name ?? 'N/A',
                     'reservas' => $establecimiento->reservas_count,
                     'rnt' => $establecimiento->rnt,
                 ];
@@ -513,7 +575,7 @@ class InformeService
                 ->proximosAniversarios(30)
                 ->count(),
             'en_periodo' => Establecimiento::activos()
-                ->whereRaw('DATE_ADD(created_at, INTERVAL 1 YEAR) BETWEEN ? AND ?', [
+                ->whereRaw("date(digitra_created_at, '+1 year') BETWEEN ? AND ?", [
                     $fechaInicio->format('Y-m-d'),
                     $fechaFin->format('Y-m-d')
                 ])
@@ -594,7 +656,7 @@ class InformeService
     /**
      * Validar calidad de datos y detectar inconsistencias
      */
-    private function validarCalidadDatos(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null): array
+    private function validarCalidadDatos(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null, ?int $digitraIdEstablecimiento = null): array
     {
         $alertas = [];
         $advertencias = [];
@@ -604,8 +666,15 @@ class InformeService
             ->whereBetween('check_in', [$fechaInicio, $fechaFin]);
 
         if ($establecimientoId) {
-            $reservasQuery->where('establecimiento_id', $establecimientoId);
-        } else {
+            $reservasQuery->where('establecimiento_digitra_id', $digitraIdEstablecimiento);
+            // VALIDACIÓN DE SEGURIDAD: Verificar que el establecimiento pertenece al usuario
+            $establecimiento = \App\Models\Digitra\Establecimiento::find($establecimientoId);
+            $digitraUserId = digitra_user_id();
+            if ($digitraUserId && (!$establecimiento || $establecimiento->user_id !== $digitraUserId)) {
+    // Si el establecimiento no existe o no pertenece al usuario, forzar query vacío
+    $reservasQuery->whereRaw('1 = 0');
+}
+    } else {
             $digitraUserId = digitra_user_id();
             if ($digitraUserId) {
                 $reservasQuery->whereHas('establecimiento', function ($q) use ($digitraUserId) {
@@ -802,7 +871,7 @@ class InformeService
     /**
      * Obtener gastos mensuales del período
      */
-    private function obtenerGastosMensuales(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null): array
+    private function obtenerGastosMensuales(Carbon $fechaInicio, Carbon $fechaFin, ?int $establecimientoId = null, ?int $digitraIdEstablecimiento = null): array
     {
         // Si es un informe de un establecimiento específico
         if ($establecimientoId) {

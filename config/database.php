@@ -31,6 +31,22 @@ return [
 
     'connections' => [
 
+        'digitra' => [
+            'driver' => 'mysql',
+            'host' => env('DIGITRA_DB_HOST', '127.0.0.1'),
+            'port' => env('DIGITRA_DB_PORT', '3306'),
+            'database' => env('DIGITRA_DB_DATABASE', 'digiroot_digitra'),
+            'username' => env('DIGITRA_DB_USERNAME', 'root'),
+            'password' => env('DIGITRA_DB_PASSWORD', ''),
+            'unix_socket' => '',
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+        ],
+
         'sqlite' => [
             'driver' => 'sqlite',
             'url' => env('DB_URL'),
@@ -38,7 +54,7 @@ return [
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
             'busy_timeout' => null,
-            'journal_mode' => null,
+            'journal_mode' => 'wal',
             'synchronous' => null,
             'transaction_mode' => 'DEFERRED',
         ],
@@ -46,8 +62,8 @@ return [
         'mysql' => [
             'driver' => 'mysql',
             'url' => env('DIGITRA_DB_URL'),
-            'host' => env('DIGITRA_DB_HOST', '195.200.7.200'),
-            'port' => env('DIGITRA_DB_PORT', '13306'),
+            'host' => env('DIGITRA_DB_HOST', '127.0.0.1'),
+            'port' => env('DIGITRA_DB_PORT', '3306'),
             'database' => env('DIGITRA_DB_DATABASE', 'digiroot_digitra'),
             'username' => env('DIGITRA_DB_USERNAME', 'root'),
             'password' => env('DIGITRA_DB_PASSWORD', ''),

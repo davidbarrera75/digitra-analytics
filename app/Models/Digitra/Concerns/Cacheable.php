@@ -38,9 +38,9 @@ trait Cacheable
         if ($key) {
             $cacheKey = 'digitra_' . static::class . '_' . $key;
             Cache::forget($cacheKey);
-        } else {
-            // Invalidar todas las claves relacionadas con este modelo
-            Cache::flush(); // En producción, usar tags de Redis para mayor precisión
         }
+        // Sin key específica: no hacer nada.
+        // Cache::flush() estaba destruyendo TODO el cache de Redis.
+        // Las claves expiran naturalmente por TTL (5 min default).
     }
 }

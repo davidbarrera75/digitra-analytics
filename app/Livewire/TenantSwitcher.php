@@ -31,22 +31,32 @@ class TenantSwitcher extends Component
             return;
         }
 
+        // Guardar tenant anterior para limpiar su cache
+        $oldTenantId = session('active_tenant_id', 'all');
+
         if ($this->selectedTenantId === 'all') {
-            // Ver todos los datos (sin filtro)
             session()->forget('active_tenant_id');
             session()->flash('message', 'Viendo datos de TODOS los tenants.');
+            $newTenantId = 'all';
         } else {
-            // Filtrar por tenant específico
             session(['active_tenant_id' => (int)$this->selectedTenantId]);
             $tenant = Tenant::find($this->selectedTenantId);
             session()->flash('message', "Viendo datos de: {$tenant->name}");
+            $newTenantId = (int)$this->selectedTenantId;
         }
 
-        // Limpiar cache
-        cache()->flush();
+        // Limpiar solo cache relacionada con los tenants involucrados (NO flush global)
+        $keysToForget = ['digitra_top_propiedades_ids'];
+        foreach ([$oldTenantId, $newTenantId, 'all'] as $tid) {
+            $keysToForget[] = 'digitra_stats_overview_' . $tid;
+            $keysToForget[] = 'digitra_reservas_por_mes_chart_' . $tid;
+        }
+        foreach ($keysToForget as $key) {
+            cache()->forget($key);
+        }
 
-        // Recargar la página para aplicar filtros
-        return redirect()->to(request()->header('Referer'));
+        // Recargar la página para aplicar filtros (usando ruta segura)
+        return redirect()->to(url()->previous('/admin'));
     }
 
     public function render()

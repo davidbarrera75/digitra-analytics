@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Models\Digitra\Establecimiento;
 use App\Models\Digitra\Reserva;
+use App\Models\InformeDescarga;
 use App\Models\ReservaCorregida;
 use App\Models\ReservaIgnorada;
 use App\Services\InformeService;
@@ -194,12 +195,24 @@ class GenerarInforme extends Page implements HasForms
      */
     private function obtenerReservasProblematicas(?Carbon $fechaInicio, ?Carbon $fechaFin, ?int $establecimientoId): array
     {
+        // Si se especifica un establecimiento, obtener su digitra_id
+        $digitraIdEstablecimiento = null;
+        if ($establecimientoId) {
+            $establecimiento = \App\Models\Digitra\Establecimiento::find($establecimientoId);
+            if ($establecimiento) {
+                $digitraIdEstablecimiento = $establecimiento->digitra_id;
+            }
+        }
         $query = Reserva::with(['establecimiento', 'huespedes'])
             ->whereBetween('check_in', [$fechaInicio, $fechaFin]);
 
         // Filtrar por establecimiento
-        if ($establecimientoId) {
-            $query->where('establecimiento_id', $establecimientoId);
+        if ($digitraIdEstablecimiento) {
+            $query->where('establecimiento_digitra_id', $digitraIdEstablecimiento);
+            // VALIDACIÓN DE SEGURIDAD: Ya verificamos que el establecimiento pertenece al usuario arriba
+        } elseif ($establecimientoId) {
+            // Si se especificó un ID pero no se encontró el establecimiento, no mostrar nada
+            $query->whereRaw('1 = 0');
         } else {
             // Filtrar por tenant
             $digitraUserId = digitra_user_id();
@@ -218,7 +231,16 @@ class GenerarInforme extends Page implements HasForms
 
         $reservas = $query->get();
 
-        return $reservas->map(function ($reserva) {
+        // Precargar correcciones e ignoradas en bulk (evita N+1)
+        $reservaIds = $reservas->pluck('id')->toArray();
+        $correcciones = !empty($reservaIds)
+            ? ReservaCorregida::whereIn('reserva_id', $reservaIds)->get()->keyBy('reserva_id')
+            : collect();
+        $ignoradas = !empty($reservaIds)
+            ? ReservaIgnorada::whereIn('reserva_id', $reservaIds)->pluck('reserva_id')->flip()
+            : collect();
+
+        return $reservas->map(function ($reserva) use ($correcciones, $ignoradas) {
             $primerHuesped = $reserva->huespedes->first();
 
             $problemas = [];
@@ -229,9 +251,8 @@ class GenerarInforme extends Page implements HasForms
                 $problemas[] = 'Precio muy alto';
             }
 
-            // Verificar si ya está corregida o ignorada
-            $correccion = ReservaCorregida::where('reserva_id', $reserva->id)->first();
-            $ignorada = ReservaIgnorada::where('reserva_id', $reserva->id)->exists();
+            $correccion = $correcciones->get($reserva->id);
+            $ignorada = $ignoradas->has($reserva->id);
 
             $estado = 'Pendiente';
             $precioMostrar = $reserva->precio;
@@ -285,6 +306,26 @@ class GenerarInforme extends Page implements HasForms
         }
 
         try {
+            // 🔒 VALIDACIÓN DE SEGURIDAD: Verificar que el establecimiento pertenece al usuario
+            if ($establecimientoId) {
+                $user = auth()->user();
+                $digitraUserId = $user->tenant?->digitra_user_id;
+                
+                // Super admin puede ver todo
+                if (!$user->isSuperAdmin()) {
+                    $establecimiento = Establecimiento::find($establecimientoId);
+                    
+                    if (!$establecimiento || $establecimiento->user_id !== $digitraUserId) {
+                        Notification::make()
+                            ->title('Error de Seguridad')
+                            ->body('No tienes permiso para acceder a este establecimiento.')
+                            ->danger()
+                            ->send();
+                        return;
+                    }
+                }
+            }
+            
             // Generar datos del informe
             $informeService = new InformeService();
             $this->datosInforme = $informeService->generarDatosInforme($fechaInicio, $fechaFin, $establecimientoId);
@@ -321,6 +362,16 @@ class GenerarInforme extends Page implements HasForms
                 Notification::make()
                     ->title('Error')
                     ->body('Reserva no encontrada.')
+                    ->danger()
+                    ->send();
+                return;
+            }
+
+            // SEGURIDAD: Verificar que la reserva pertenece al tenant actual
+            if (!$this->reservaPerteneceAlTenant($reserva)) {
+                Notification::make()
+                    ->title('Error de Seguridad')
+                    ->body('No tienes permiso para modificar esta reserva.')
                     ->danger()
                     ->send();
                 return;
@@ -368,6 +419,17 @@ class GenerarInforme extends Page implements HasForms
     public function ignorarReserva($reservaId, $motivo = 'duplicada', $notas = null): void
     {
         try {
+            // SEGURIDAD: Verificar que la reserva pertenece al tenant actual
+            $reserva = Reserva::find($reservaId);
+            if (!$reserva || !$this->reservaPerteneceAlTenant($reserva)) {
+                Notification::make()
+                    ->title('Error de Seguridad')
+                    ->body('No tienes permiso para modificar esta reserva.')
+                    ->danger()
+                    ->send();
+                return;
+            }
+
             ReservaIgnorada::create([
                 'reserva_id' => $reservaId,
                 'motivo' => $motivo,
@@ -409,6 +471,17 @@ class GenerarInforme extends Page implements HasForms
     public function restaurarReserva($reservaId): void
     {
         try {
+            // SEGURIDAD: Verificar que la reserva pertenece al tenant actual
+            $reserva = Reserva::find($reservaId);
+            if (!$reserva || !$this->reservaPerteneceAlTenant($reserva)) {
+                Notification::make()
+                    ->title('Error de Seguridad')
+                    ->body('No tienes permiso para modificar esta reserva.')
+                    ->danger()
+                    ->send();
+                return;
+            }
+
             ReservaIgnorada::where('reserva_id', $reservaId)->delete();
             ReservaCorregida::where('reserva_id', $reservaId)->delete();
 
@@ -471,6 +544,25 @@ class GenerarInforme extends Page implements HasForms
                 return response()->streamDownload(function () {}, '');
             }
 
+            // 🔒 VALIDACIÓN DE SEGURIDAD: Verificar que el establecimiento pertenece al usuario
+            if ($establecimientoId) {
+                $user = auth()->user();
+                $digitraUserId = $user->tenant?->digitra_user_id;
+                
+                if (!$user->isSuperAdmin()) {
+                    $establecimiento = Establecimiento::find($establecimientoId);
+                    
+                    if (!$establecimiento || $establecimiento->user_id !== $digitraUserId) {
+                        Notification::make()
+                            ->title('Error de Seguridad')
+                            ->body('No tienes permiso para acceder a este establecimiento.')
+                            ->danger()
+                            ->send();
+                        return response()->streamDownload(function () {}, '');
+                    }
+                }
+            }
+            
             // Generar datos del informe
             $informeService = new InformeService();
             $datosInforme = $informeService->generarDatosInforme($fechaInicio, $fechaFin, $establecimientoId);
@@ -494,6 +586,33 @@ class GenerarInforme extends Page implements HasForms
             $nombreArchivo = 'Informe_General_' . $fechaInicio->format('Ymd') . '_' . $fechaFin->format('Ymd') . '.pdf';
         }
 
+        // 📊 TRACKING: Registrar descarga del informe
+        try {
+            $user = auth()->user();
+            $tipoInforme = $establecimientoId ? 'especifico' : 'general';
+            $establecimiento = $establecimientoId ? Establecimiento::find($establecimientoId) : null;
+
+            InformeDescarga::create([
+                'user_id' => $user?->id,
+                'user_email' => $user?->email,
+                'user_name' => $user?->name,
+                'tipo_informe' => $tipoInforme,
+                'establecimiento_id' => $establecimientoId,
+                'establecimiento_nombre' => $establecimiento?->nombre,
+                'fecha_inicio' => $fechaInicio,
+                'fecha_fin' => $fechaFin,
+                'dias_periodo' => $fechaInicio->diffInDays($fechaFin),
+                'nombre_archivo' => $nombreArchivo,
+                'total_reservas' => $datosInforme['estadisticas_generales']['total_reservas'] ?? 0,
+                'total_ingresos' => $datosInforme['estadisticas_generales']['total_ingresos'] ?? 0,
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent(),
+            ]);
+        } catch (\Exception $e) {
+            // Silenciar errores de tracking para no afectar la descarga
+            \Log::error('Error al registrar descarga de informe: ' . $e->getMessage());
+        }
+
         Notification::make()
             ->title('Informe Generado')
             ->body('El informe PDF se ha generado correctamente.')
@@ -511,5 +630,31 @@ class GenerarInforme extends Page implements HasForms
     protected function getHeaderActions(): array
     {
         return [];
+    }
+
+    /**
+     * SEGURIDAD: Verificar que una reserva pertenece al tenant actual
+     */
+    private function reservaPerteneceAlTenant(Reserva $reserva): bool
+    {
+        $user = auth()->user();
+
+        // Super admin puede modificar cualquier reserva
+        if ($user->isSuperAdmin()) {
+            return true;
+        }
+
+        $digitraUserId = $user->tenant?->digitra_user_id;
+        if (!$digitraUserId) {
+            return false;
+        }
+
+        // Verificar que el establecimiento de la reserva pertenece al usuario
+        $establecimiento = $reserva->establecimiento;
+        if (!$establecimiento) {
+            return false;
+        }
+
+        return (int) $establecimiento->user_id === (int) $digitraUserId;
     }
 }
